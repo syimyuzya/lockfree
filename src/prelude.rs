@@ -1,4 +1,5 @@
 pub use channel::{mpmc, mpsc, spmc, spsc};
+pub use deque::Deque;
 pub use map::Map;
 pub use queue::Queue;
 pub use set::Set;

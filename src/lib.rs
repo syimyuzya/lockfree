@@ -49,6 +49,9 @@ pub mod queue;
 /// A lock-free stack.
 pub mod stack;
 
+/// A lock-free deque
+pub mod deque;
+
 /// A lock-free map.
 pub mod map;
 

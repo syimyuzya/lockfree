@@ -3,9 +3,8 @@ use owned_alloc::OwnedAlloc;
 use ptr::bypass_null;
 use std::{
     fmt,
-    iter::FromIterator,
     mem::ManuallyDrop,
-    ptr::{null_mut, NonNull},
+    ptr::null_mut,
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
@@ -458,6 +457,7 @@ impl<T> fmt::Debug for Garbage<T> {
 mod tests {
     use super::*;
 
+    use std::iter::FromIterator;
     use std::{sync::Arc, thread};
 
     #[test]
@@ -822,12 +822,6 @@ impl<T> Stack<T> {
         for elem in iterable {
             self.push(elem);
         }
-    }
-}
-
-impl<T> Drop for Stack<T> {
-    fn drop(&mut self) {
-        while let Some(_) = self.next() {}
     }
 }
 

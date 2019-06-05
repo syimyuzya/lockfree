@@ -48,7 +48,8 @@ impl<T> Deque<T> {
             if anchor_ref.back.is_null() {
                 new_anchor.front = node_ptr;
                 new_anchor.back = node_ptr;
-                new_anchor.status = anchor_ref.status;
+                new_anchor.status = Status::Stable;
+                // TODO DRY
                 match self.anchor.compare_exchange_weak(
                     anchor_ptr,
                     new_anchor.raw().as_ptr(),
@@ -109,7 +110,7 @@ impl<T> Deque<T> {
             if anchor_ref.front == anchor_ref.back {
                 new_anchor.front = null_mut();
                 new_anchor.back = null_mut();
-                new_anchor.status = anchor_ref.status;
+                new_anchor.status = Status::Stable;
                 match self.anchor.compare_exchange_weak(
                     anchor_ptr,
                     new_anchor.raw().as_ptr(),
@@ -409,7 +410,7 @@ mod tests {
                 let dq = Arc::clone(&deque);
                 thread::spawn(move || {
                     let mut vals = Vec::new();
-                    for i in 0..num_vals {
+                    for _ in 0..num_vals {
                         // println!("[T{}] Popping", k);
                         let res = dq.pop_back();
                         match res {
@@ -502,7 +503,7 @@ mod tests {
                 let dq = Arc::clone(&deque);
                 thread::spawn(move || {
                     let mut vals = Vec::new();
-                    for i in 0..num_vals {
+                    for _ in 0..num_vals {
                         // println!("[T{}] Popping", k);
                         let res = dq.pop_back();
                         match res {

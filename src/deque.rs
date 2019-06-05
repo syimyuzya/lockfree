@@ -189,7 +189,7 @@ impl<T> Deque<T> {
                 let prev = back_ref.prev.load(Acquire);
                 new_anchor.front = anchor_ref.front;
                 new_anchor.back = prev;
-                new_anchor.status = Status::PoppingBack;
+                new_anchor.status = Status::Stable;
                 match self.anchor.compare_exchange_weak(
                     anchor_ptr,
                     new_anchor.raw().as_ptr(),
@@ -249,7 +249,7 @@ impl<T> Deque<T> {
                 let next = front_ref.next.load(Acquire);
                 new_anchor.front = next;
                 new_anchor.back = anchor_ref.back;
-                new_anchor.status = Status::PoppingFront;
+                new_anchor.status = Status::Stable;
                 match self.anchor.compare_exchange_weak(
                     anchor_ptr,
                     new_anchor.raw().as_ptr(),
@@ -284,51 +284,6 @@ impl<T> Deque<T> {
         let anchor_nnptr = unsafe { bypass_null(anchor) };
         let anchor_ref = unsafe { anchor_nnptr.as_ref() };
         match anchor_ref.status {
-            Status::PoppingBack => {
-                // Reset the pointer at the front/back to prevent ABA.
-                let back_ref = unsafe { &*anchor_ref.back };
-                let back_next = back_ref.next.load(Acquire);
-                if self.anchor.load(Acquire) != anchor {
-                    return;
-                }
-                if !back_next.is_null() {
-                    if back_ref
-                        .next
-                        .compare_exchange_weak(
-                            back_next,
-                            null_mut(),
-                            Release,
-                            Relaxed,
-                        )
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-            },
-            Status::PoppingFront => {
-                // TODO DRY?
-                // Reset the pointer at the front/back to prevent ABA.
-                let front_ref = unsafe { &*anchor_ref.front };
-                let front_prev = front_ref.prev.load(Acquire);
-                if self.anchor.load(Acquire) != anchor {
-                    return;
-                }
-                if !front_prev.is_null() {
-                    if front_ref
-                        .prev
-                        .compare_exchange_weak(
-                            front_prev,
-                            null_mut(),
-                            Release,
-                            Relaxed,
-                        )
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-            },
             Status::PushingBack => {
                 let prev = unsafe { (&*anchor_ref.back).prev.load(SeqCst) };
                 let prev_next = unsafe { (&*prev).next.load(Acquire) };
@@ -374,7 +329,9 @@ impl<T> Deque<T> {
                     }
                 }
             },
-            Status::Stable => {},
+            Status::Stable => {
+                return;
+            },
         }
         // On success, try to mark the state as Stable.
         let new_anchor = OwnedAlloc::new(Anchor::new(
@@ -449,8 +406,6 @@ enum Status {
     Stable,
     PushingFront,
     PushingBack,
-    PoppingFront,
-    PoppingBack,
 }
 
 #[derive(Debug)]

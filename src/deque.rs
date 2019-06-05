@@ -506,7 +506,7 @@ mod tests {
     use std::{sync::Arc, thread};
 
     #[test]
-    fn simple() {
+    fn push_pop_back() {
         let deque: Deque<i32> = Deque::new();
 
         assert_eq!(None, deque.pop_back());
@@ -520,13 +520,8 @@ mod tests {
         assert_eq!(Some(44), deque.pop_back());
         assert_eq!(Some(43), deque.pop_back());
         assert_eq!(None, deque.pop_back());
-    }
 
-    #[test]
-    fn push_pop() {
-        let deque: Deque<i32> = Deque::new();
         deque.push_back(45);
-
         deque.push_back(46);
         assert_eq!(Some(46), deque.pop_back());
 
@@ -735,36 +730,42 @@ mod tests {
     fn concurrent_push_front_pop_back() {
         let deque = Arc::new(Deque::<i32>::new());
         let num_threads: usize = 4;
-        let num_vals: usize = 32;
+        let num_vals: usize = 2048;
         let push_handles: Vec<_> = (0 .. num_threads)
             .map(|k| {
                 let dq = Arc::clone(&deque);
-                thread::spawn(move || {
-                    for i in 0 .. num_vals {
-                        let x = (k * num_vals + i) as i32;
-                        // println!("[T{}] Pushing: {}", k, x);
-                        dq.push_front(x);
-                        // println!("  [T{}] Pushed: {}", k, x);
-                    }
-                })
+                thread::Builder::new()
+                    .name(format!("T{}push", k))
+                    .spawn(move || {
+                        for i in 0 .. num_vals {
+                            let x = (k * num_vals + i) as i32;
+                            // println!("[T{}push] Pushing: {}", k, x);
+                            dq.push_front(x);
+                            // println!("  [T{}push] Pushed: {}", k, x);
+                        }
+                    })
+                    .unwrap()
             })
             .collect();
         let pop_handles: Vec<_> = (0 .. num_threads)
-            .map(|_k| {
+            .map(|k| {
                 let dq = Arc::clone(&deque);
-                thread::spawn(move || {
-                    let mut vals = Vec::new();
-                    while vals.len() < num_vals {
-                        // println!("[T{}] Popping", k);
-                        if let Some(v) = dq.pop_back() {
-                            // println!("  [T{}] Got: {}", k, v);
-                            vals.push(v);
-                        } else {
-                            // println!("  [T{}] Got nothing", k);
+                thread::Builder::new()
+                    .name(format!("T{}pop", k))
+                    .spawn(move || {
+                        let mut vals = Vec::new();
+                        while vals.len() < num_vals {
+                            // println!("[T{}pop] Popping", k);
+                            if let Some(v) = dq.pop_back() {
+                                // println!("  [T{}pop] Got: {}", k, v);
+                                vals.push(v);
+                            } else {
+                                // println!("  [T{}pop] Got nothing", k);
+                            }
                         }
-                    }
-                    vals
-                })
+                        vals
+                    })
+                    .unwrap()
             })
             .collect();
         let mut all_vals = Vec::new();
@@ -772,6 +773,71 @@ mod tests {
         for (i, handle) in pop_handles.into_iter().enumerate() {
             let vals = handle.join().unwrap();
             println!("Values (T{}): {:?}", i, vals);
+            all_vals.extend(vals);
+        }
+        all_vals.sort_unstable();
+        let expected = Vec::from_iter(0 .. ((num_threads * num_vals) as i32));
+        assert_eq!(expected, all_vals);
+    }
+
+    #[test]
+    fn concurrent_push_pop_deque() {
+        let deque = Arc::new(Deque::<i32>::new());
+        let num_threads: usize = 32;
+        let num_vals: usize = 16384;
+        let push_handles: Vec<_> = (0 .. num_threads)
+            .map(|k| {
+                let dq = Arc::clone(&deque);
+                thread::Builder::new()
+                    .name(format!("T{}push", k))
+                    .spawn(move || {
+                        for i in 0 .. num_vals {
+                            let x = (k * num_vals + i) as i32;
+                            if x % 2 != 0 {
+                                // println!("[T{}push] Front: {}", k, x);
+                                dq.push_front(x);
+                            } else {
+                                // println!("[T{}push] Back: {}", k, x);
+                                dq.push_back(x);
+                            }
+                            // println!("  [T{}push] Pushed: {}", k, x);
+                        }
+                    })
+                    .unwrap()
+            })
+            .collect();
+        let pop_handles: Vec<_> = (0 .. num_threads)
+            .map(|k| {
+                let dq = Arc::clone(&deque);
+                thread::Builder::new()
+                    .name(format!("T{}pop", k))
+                    .spawn(move || {
+                        let mut vals = Vec::new();
+                        while vals.len() < num_vals {
+                            let res = if k % 2 != 0 {
+                                // println!("[T{}pop] Back", k);
+                                dq.pop_back()
+                            } else {
+                                // println!("[T{}pop] Front", k);
+                                dq.pop_front()
+                            };
+                            if let Some(v) = res {
+                                // println!("  [T{}pop] Got: {}", k, v);
+                                vals.push(v);
+                            } else {
+                                // println!("  [T{}pop] Got nothing", k);
+                            }
+                        }
+                        vals
+                    })
+                    .unwrap()
+            })
+            .collect();
+        let mut all_vals = Vec::new();
+        push_handles.into_iter().for_each(|h| h.join().unwrap());
+        for (_i, handle) in pop_handles.into_iter().enumerate() {
+            let vals = handle.join().unwrap();
+            //println!("Values (T{}): {:?}", _i, vals);
             all_vals.extend(vals);
         }
         all_vals.sort_unstable();

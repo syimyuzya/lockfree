@@ -26,18 +26,33 @@ impl Spawn for DequeMachine {
 impl Machine for DequeMachine {
     fn interpret(&mut self, mut byte: u8, bytecode: &mut Bytecode) {
         loop {
-            // TODO more operations.
+            let is_back = byte & 4 != 0;
             match byte % 4 {
-                0 => byte = self.deque.pop_back().map_or(1, |x| *x),
+                0 => {
+                    byte = if is_back {
+                        self.deque.pop_back()
+                    } else {
+                        self.deque.pop_front()
+                    }
+                    .map_or(1, |x| *x);
+                },
 
                 1 => {
-                    self.deque.pop_back();
+                    if is_back {
+                        self.deque.pop_back();
+                    } else {
+                        self.deque.pop_front();
+                    }
                     break;
                 },
 
                 2 | 3 => {
                     let val = bytecode.next().unwrap_or(0);
-                    self.deque.push_back(Box::new(val));
+                    if is_back {
+                        self.deque.push_back(Box::new(val));
+                    } else {
+                        self.deque.push_front(Box::new(val));
+                    }
                     break;
                 },
 

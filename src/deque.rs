@@ -95,6 +95,69 @@ impl<T> Deque<T> {
         }
     }
 
+    /// Pushes a new value to the front of the deque.
+    pub fn push_front(&self, item: T) {
+        // TODO DRY?
+        let node = OwnedAlloc::new(Node::with_val(item));
+        let node_ptr = node.raw().as_ptr();
+        let mut new_anchor = OwnedAlloc::new(Anchor::<T>::default());
+
+        let pause = self.incin.inner.pause();
+        let mut anchor_ptr = self.anchor.load(Acquire);
+        loop {
+            // Safe because `anchor` is never null.
+            let anchor_nnptr = unsafe { bypass_null(anchor_ptr) };
+            let anchor_ref = unsafe { anchor_nnptr.as_ref() };
+            if anchor_ref.front.is_null() {
+                new_anchor.front = node_ptr;
+                new_anchor.back = node_ptr;
+                new_anchor.status = Status::Stable;
+                // TODO DRY
+                match self.anchor.compare_exchange_weak(
+                    anchor_ptr,
+                    new_anchor.raw().as_ptr(),
+                    Release,
+                    Relaxed,
+                ) {
+                    Ok(_) => {
+                        node.into_raw();
+                        new_anchor.into_raw();
+                        pause.add_to_incin(Garbage::Anchor(unsafe {
+                            OwnedAlloc::from_raw(anchor_nnptr)
+                        }));
+                        return;
+                    }
+                    Err(latest) => anchor_ptr = latest,
+                }
+            } else if anchor_ref.status == Status::Stable {
+                node.next.store(anchor_ref.front, Release); // TODO ordering
+                new_anchor.front = node_ptr;
+                new_anchor.back = anchor_ref.back;
+                new_anchor.status = Status::PushingFront;
+                match self.anchor.compare_exchange_weak(
+                    anchor_ptr,
+                    new_anchor.raw().as_ptr(),
+                    Release,
+                    Relaxed,
+                ) {
+                    Ok(_) => {
+                        node.into_raw();
+                        let new_anchor_ptr = new_anchor.into_raw().as_ptr();
+                        pause.add_to_incin(Garbage::Anchor(unsafe {
+                            OwnedAlloc::from_raw(anchor_nnptr)
+                        }));
+                        self.stablize(new_anchor_ptr, &pause);
+                        return;
+                    }
+                    Err(latest) => anchor_ptr = latest,
+                }
+            } else {
+                self.stablize(anchor_ptr, &pause);
+                anchor_ptr = self.anchor.load(Acquire);
+            }
+        }
+    }
+
     /// Pops a single element from the back of the deque.
     pub fn pop_back(&self) -> Option<T> {
         let pause = self.incin.inner.pause();
@@ -155,53 +218,163 @@ impl<T> Deque<T> {
         return Some(val);
     }
 
+    /// Pops a single element from the back of the deque.
+    pub fn pop_front(&self) -> Option<T> {
+        let pause = self.incin.inner.pause();
+        let mut anchor_ptr = self.anchor.load(Acquire);
+        let mut new_anchor = OwnedAlloc::new(Anchor::default());
+        loop {
+            // Safe because anchor is never null.
+            let anchor_nnptr = unsafe { bypass_null(anchor_ptr) };
+            let anchor_ref = unsafe { anchor_nnptr.as_ref() };
+            if anchor_ref.front.is_null() {
+                return None;
+            }
+            if anchor_ref.front == anchor_ref.back {
+                new_anchor.front = null_mut();
+                new_anchor.back = null_mut();
+                new_anchor.status = Status::Stable;
+                match self.anchor.compare_exchange_weak(
+                    anchor_ptr,
+                    new_anchor.raw().as_ptr(),
+                    Release,
+                    Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(latest) => anchor_ptr = latest,
+                }
+            } else if anchor_ref.status == Status::Stable {
+                // Safe because the incinerator is paused.
+                let front_ref = unsafe { &*anchor_ref.front };
+                let next = front_ref.next.load(Acquire);
+                new_anchor.front = next;
+                new_anchor.back = anchor_ref.back;
+                new_anchor.status = Status::PoppingFront;
+                match self.anchor.compare_exchange_weak(
+                    anchor_ptr,
+                    new_anchor.raw().as_ptr(),
+                    Release,
+                    Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(latest) => anchor_ptr = latest,
+                }
+            } else {
+                self.stablize(anchor_ptr, &pause);
+                anchor_ptr = self.anchor.load(Acquire);
+            }
+        }
+        let anchor_nnptr = unsafe { bypass_null(anchor_ptr) };
+        let anchor_ref = unsafe { anchor_nnptr.as_ref() };
+        new_anchor.into_raw();
+        let mut front_nnptr = unsafe { bypass_null(anchor_ref.front) };
+        let val = unsafe { (&mut *front_nnptr.as_mut().val as *mut T).read() };
+        pause.add_to_incin(Garbage::Anchor(unsafe {
+            OwnedAlloc::from_raw(anchor_nnptr)
+        }));
+        pause.add_to_incin(Garbage::Node(unsafe {
+            OwnedAlloc::from_raw(front_nnptr)
+        }));
+        return Some(val);
+    }
+
     /// Tries to fix node links.
     fn stablize(&self, anchor: *mut Anchor<T>, pause: &Pause<Garbage<T>>) {
         // Safe because the incinerator is still paused.
         let anchor_nnptr = unsafe { bypass_null(anchor) };
         let anchor_ref = unsafe { anchor_nnptr.as_ref() };
-        if anchor_ref.status == Status::PoppingBack {
-            // Reset the pointer at the front/back to prevent ABA.
-            let back_ref = unsafe { &*anchor_ref.back };
-            let back_next = back_ref.next.load(Acquire);
-            if self.anchor.load(Acquire) != anchor {
-                return;
-            }
-            if !back_next.is_null() {
-                if back_ref
-                    .next
-                    .compare_exchange_weak(
-                        back_next,
-                        null_mut(),
-                        Release,
-                        Relaxed,
-                    )
-                    .is_err()
-                {
+        match anchor_ref.status {
+            Status::PoppingBack => {
+                // Reset the pointer at the front/back to prevent ABA.
+                let back_ref = unsafe { &*anchor_ref.back };
+                let back_next = back_ref.next.load(Acquire);
+                if self.anchor.load(Acquire) != anchor {
                     return;
                 }
-            }
-        } else if anchor_ref.status == Status::PushingBack {
-            let prev = unsafe { (&*anchor_ref.back).prev.load(SeqCst) };
-            let prevnext = unsafe { (&*prev).next.load(Acquire) };
-            if self.anchor.load(Acquire) != anchor {
-                return;
-            }
-            if prevnext != anchor_ref.back {
-                let prev_ref = unsafe { &*prev };
-                if prev_ref
-                    .next
-                    .compare_exchange_weak(
-                        prevnext,
-                        anchor_ref.back,
-                        Release,
-                        Relaxed,
-                    )
-                    .is_err()
-                {
-                    return;
+                if !back_next.is_null() {
+                    if back_ref
+                        .next
+                        .compare_exchange_weak(
+                            back_next,
+                            null_mut(),
+                            Release,
+                            Relaxed,
+                        )
+                        .is_err()
+                    {
+                        return;
+                    }
                 }
             }
+            Status::PoppingFront => {
+                // TODO DRY?
+                // Reset the pointer at the front/back to prevent ABA.
+                let front_ref = unsafe { &*anchor_ref.front };
+                let front_prev = front_ref.prev.load(Acquire);
+                if self.anchor.load(Acquire) != anchor {
+                    return;
+                }
+                if !front_prev.is_null() {
+                    if front_ref
+                        .prev
+                        .compare_exchange_weak(
+                            front_prev,
+                            null_mut(),
+                            Release,
+                            Relaxed,
+                        )
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+            Status::PushingBack => {
+                let prev = unsafe { (&*anchor_ref.back).prev.load(SeqCst) };
+                let prev_next = unsafe { (&*prev).next.load(Acquire) };
+                if self.anchor.load(Acquire) != anchor {
+                    return;
+                }
+                if prev_next != anchor_ref.back {
+                    let prev_ref = unsafe { &*prev };
+                    if prev_ref
+                        .next
+                        .compare_exchange_weak(
+                            prev_next,
+                            anchor_ref.back,
+                            Release,
+                            Relaxed,
+                        )
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+            Status::PushingFront => {
+                // TODO DRY?
+                let next = unsafe { (&*anchor_ref.front).next.load(SeqCst) };
+                let next_prev = unsafe { (&*next).prev.load(Acquire) };
+                if self.anchor.load(Acquire) != anchor {
+                    return;
+                }
+                if next_prev != anchor_ref.front {
+                    let next_ref = unsafe { &*next };
+                    if next_ref
+                        .prev
+                        .compare_exchange_weak(
+                            next_prev,
+                            anchor_ref.front,
+                            Release,
+                            Relaxed,
+                        )
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+            Status::Stable => {}
         }
         // On success, try to mark the state as Stable.
         let new_anchor = OwnedAlloc::new(Anchor::new(
@@ -532,6 +705,80 @@ mod tests {
         let expected: Vec<_> = (0..(num_threads * num_vals))
             .map(|i| format!("sro{:03}orz", i))
             .collect();
+        assert_eq!(expected, all_vals);
+    }
+
+    #[test]
+    fn push_back_pop_front() {
+        let deque = Deque::<i32>::new();
+        assert_eq!(None, deque.pop_front());
+
+        deque.push_back(42);
+        assert_eq!(Some(42), deque.pop_front());
+        assert_eq!(None, deque.pop_front());
+
+        deque.push_back(43);
+        deque.push_back(44);
+        assert_eq!(Some(43), deque.pop_front());
+        assert_eq!(Some(44), deque.pop_front());
+        assert_eq!(None, deque.pop_front());
+
+        deque.push_back(45);
+        deque.push_back(46);
+        assert_eq!(Some(45), deque.pop_front());
+        deque.push_back(47);
+        deque.push_back(48);
+        assert_eq!(Some(46), deque.pop_front());
+        assert_eq!(Some(47), deque.pop_front());
+        assert_eq!(Some(48), deque.pop_front());
+        assert_eq!(None, deque.pop_front());
+    }
+
+    #[test]
+    fn concurrent_push_front_pop_back() {
+        let deque = Arc::new(Deque::<i32>::new());
+        let num_threads: usize = 4;
+        let num_vals: usize = 32;
+        let push_handles: Vec<_> = (0..num_threads)
+            .map(|k| {
+                let dq = Arc::clone(&deque);
+                thread::spawn(move || {
+                    for i in 0..num_vals {
+                        let x = (k * num_vals + i) as i32;
+                        // println!("[T{}] Pushing: {}", k, x);
+                        dq.push_front(x);
+                        // println!("  [T{}] Pushed: {}", k, x);
+                    }
+                })
+            })
+            .collect();
+        let pop_handles: Vec<_> = (0..num_threads)
+            .map(|_k| {
+                let dq = Arc::clone(&deque);
+                thread::spawn(move || {
+                    let mut vals = Vec::new();
+                    while vals.len() < num_vals {
+                        // println!("[T{}] Popping", k);
+                        if let Some(v) = dq.pop_back() {
+                            // println!("  [T{}] Got: {}", k, v);
+                            vals.push(v);
+                        } else {
+                            // println!("  [T{}] Got nothing", k);
+                        }
+                    }
+                    vals
+                })
+            })
+            .collect();
+        let mut all_vals = Vec::new();
+        push_handles.into_iter().for_each(|h| h.join().unwrap());
+        for (i, handle) in pop_handles.into_iter().enumerate() {
+            let vals = handle.join().unwrap();
+            println!("Values (T{}): {:?}", i, vals);
+            all_vals.extend(vals);
+        }
+        all_vals.sort_unstable();
+        let expected = Vec::from_iter(0..((num_threads * num_vals) as i32));
         assert_eq!(expected, all_vals);
     }
 }

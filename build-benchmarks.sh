@@ -5,6 +5,7 @@ FILE=../BENCHMARKS.md
 
 truncate --size 0 $FILE
 
+# FIXME macOS
 echo '# CPU info' >> $FILE
 echo '```' >> $FILE
 lscpu >> $FILE
@@ -36,6 +37,13 @@ echo '## STACK' >> $FILE
 echo '```' >> $FILE
 echo '' >> $FILE
 cargo run --bin stack --release >> $FILE || exit 1
+echo '```' >> $FILE
+echo '' >> $FILE
+
+echo '## DEQUE' >> $FILE
+echo '```' >> $FILE
+echo '' >> $FILE
+cargo run --bin deque --release >> $FILE || exit 1
 echo '```' >> $FILE
 echo '' >> $FILE
 

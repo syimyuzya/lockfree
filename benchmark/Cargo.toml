@@ -21,6 +21,10 @@ name = "queue"
 path = "src/queue.rs"
 
 [[bin]]
+name = "deque"
+path = "src/deque.rs"
+
+[[bin]]
 name = "map"
 path = "src/map.rs"
 

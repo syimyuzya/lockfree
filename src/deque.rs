@@ -149,6 +149,9 @@ impl<T> Deque<T> {
         pause.add_to_incin(Garbage::Anchor(unsafe {
             OwnedAlloc::from_raw(anchor_nnptr)
         }));
+        pause.add_to_incin(Garbage::Node(unsafe {
+            OwnedAlloc::from_raw(back_nnptr)
+        }));
         return Some(val);
     }
 

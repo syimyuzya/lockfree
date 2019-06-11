@@ -23,7 +23,7 @@
 //! - `[x]` [Set](set::Set)
 //! - `[x]` [Stack](stack::Stack)
 //! - `[x]` [Queue](queue::Queue)
-//! - `[ ]` Deque
+//! - `[ ]` [Deque](deque::Deque) (under construction)
 //!
 //! # Performance Guide
 //! In order to achieve a better time performance with lockfree, it is

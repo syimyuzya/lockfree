@@ -457,8 +457,7 @@ impl<T> fmt::Debug for Garbage<T> {
 mod tests {
     use super::*;
 
-    use std::iter::FromIterator;
-    use std::{sync::Arc, thread};
+    use std::{iter::FromIterator, sync::Arc, thread};
 
     #[test]
     fn push_pop_back() {

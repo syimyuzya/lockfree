@@ -62,7 +62,7 @@ impl<T> Deque<T> {
                             OwnedAlloc::from_raw(anchor_nnptr)
                         }));
                         return;
-                    },
+                    }
                     Err(latest) => anchor_ptr = latest,
                 }
             } else if anchor_ref.status == Status::Stable {
@@ -84,7 +84,7 @@ impl<T> Deque<T> {
                         }));
                         self.stablize(new_anchor_ptr, &pause);
                         return;
-                    },
+                    }
                     Err(latest) => anchor_ptr = latest,
                 }
             } else {
@@ -125,7 +125,7 @@ impl<T> Deque<T> {
                             OwnedAlloc::from_raw(anchor_nnptr)
                         }));
                         return;
-                    },
+                    }
                     Err(latest) => anchor_ptr = latest,
                 }
             } else if anchor_ref.status == Status::Stable {
@@ -147,7 +147,7 @@ impl<T> Deque<T> {
                         }));
                         self.stablize(new_anchor_ptr, &pause);
                         return;
-                    },
+                    }
                     Err(latest) => anchor_ptr = latest,
                 }
             } else {
@@ -284,8 +284,8 @@ impl<T> Deque<T> {
         let anchor_ref = unsafe { anchor_nnptr.as_ref() };
         match anchor_ref.status {
             Status::PushingBack => {
-                let prev = unsafe { (&*anchor_ref.back).prev.load(SeqCst) };
-                let prev_next = unsafe { (&*prev).next.load(Acquire) };
+                let prev = unsafe { (*anchor_ref.back).prev.load(SeqCst) };
+                let prev_next = unsafe { (*prev).next.load(Acquire) };
                 if self.anchor.load(Acquire) != anchor {
                     return;
                 }
@@ -304,7 +304,7 @@ impl<T> Deque<T> {
                         return;
                     }
                 }
-            },
+            }
             Status::PushingFront => {
                 // TODO DRY?
                 let next = unsafe { (&*anchor_ref.front).next.load(SeqCst) };
@@ -327,10 +327,10 @@ impl<T> Deque<T> {
                         return;
                     }
                 }
-            },
+            }
             Status::Stable => {
                 return;
-            },
+            }
         }
         // On success, try to mark the state as Stable.
         let new_anchor = OwnedAlloc::new(Anchor::new(
@@ -495,11 +495,11 @@ mod tests {
         let deque = Arc::new(Deque::<i32>::new());
         let num_threads = 4;
         let num_vals = 32;
-        let handles: Vec<_> = (0 .. num_threads)
+        let handles: Vec<_> = (0..num_threads)
             .map(|k| {
                 let dq = Arc::clone(&deque);
                 thread::spawn(move || {
-                    for i in 0 .. num_vals {
+                    for i in 0..num_vals {
                         let x = k * num_vals + i;
                         // println!("[T{}] Pushing: {}", k, x);
                         dq.push_back(x);
@@ -517,7 +517,7 @@ mod tests {
         }
         println!("Values: {:?}", vals);
         vals.sort_unstable();
-        let expected = Vec::from_iter(0 .. (num_threads * num_vals));
+        let expected = Vec::from_iter(0..(num_threads * num_vals));
         assert_eq!(expected, vals);
     }
 
@@ -526,22 +526,22 @@ mod tests {
         let deque = Arc::new(Deque::<i32>::new());
         let num_threads = 4;
         let num_vals = 32;
-        for i in 0 .. (num_threads * num_vals) {
+        for i in 0..(num_threads * num_vals) {
             deque.push_back(i);
         }
-        let handles: Vec<_> = (0 .. num_threads)
+        let handles: Vec<_> = (0..num_threads)
             .map(|k| {
                 let dq = Arc::clone(&deque);
                 thread::spawn(move || {
                     let mut vals = Vec::new();
-                    for _ in 0 .. num_vals {
+                    for _ in 0..num_vals {
                         // println!("[T{}] Popping", k);
                         let res = dq.pop_back();
                         match res {
                             Some(v) => {
                                 // println!("  [T{}] Got: {}", k, v);
                                 vals.push(v);
-                            },
+                            }
                             None => panic!("[T{}] Failed", k),
                         }
                     }
@@ -556,7 +556,7 @@ mod tests {
             all_vals.extend(vec);
         }
         all_vals.sort_unstable();
-        let expected = Vec::from_iter(0 .. (num_threads * num_vals));
+        let expected = Vec::from_iter(0..(num_threads * num_vals));
         assert_eq!(expected, all_vals);
     }
 
@@ -566,12 +566,12 @@ mod tests {
         let num_threads = 20;
         let num_vals = 800;
         let modulo = 55;
-        let handles: Vec<_> = (0 .. num_threads)
+        let handles: Vec<_> = (0..num_threads)
             .map(|k| {
                 let dq = Arc::clone(&deque);
                 thread::spawn(move || {
                     let mut vals = Vec::new();
-                    for i in 0 .. num_vals {
+                    for i in 0..num_vals {
                         let x = num_vals * k + i;
                         if (x + 1) % modulo == 0 {
                             // println!("[T{}] Popping", k);
@@ -579,7 +579,7 @@ mod tests {
                                 Some(v) => {
                                     // println!("  [T{}] Got: {}", k, v);
                                     vals.push(v);
-                                },
+                                }
                                 None => panic!("[T{}] Failed", k),
                             }
                         } else {
@@ -606,7 +606,7 @@ mod tests {
         println!("Values (deque): {:?}", dq_vals);
         all_vals.extend(dq_vals);
         all_vals.sort_unstable();
-        let expected: Vec<_> = (0 .. (num_threads * num_vals))
+        let expected: Vec<_> = (0..(num_threads * num_vals))
             .filter(|i| (i + 1) % modulo != 0)
             .collect();
         assert_eq!(expected, all_vals);
@@ -617,23 +617,23 @@ mod tests {
         let deque = Arc::new(Deque::<String>::new());
         let num_threads = 4;
         let num_vals = 32;
-        for i in 0 .. (num_threads * num_vals) {
+        for i in 0..(num_threads * num_vals) {
             let s = format!("sro{:03}orz", i);
             deque.push_back(s);
         }
-        let handles: Vec<_> = (0 .. num_threads)
+        let handles: Vec<_> = (0..num_threads)
             .map(|k| {
                 let dq = Arc::clone(&deque);
                 thread::spawn(move || {
                     let mut vals = Vec::new();
-                    for _ in 0 .. num_vals {
+                    for _ in 0..num_vals {
                         // println!("[T{}] Popping", k);
                         let res = dq.pop_back();
                         match res {
                             Some(v) => {
                                 // println!("  [T{}] Got: {}", k, v);
                                 vals.push(v);
-                            },
+                            }
                             None => panic!("[T{}] Failed", k),
                         }
                     }
@@ -648,7 +648,7 @@ mod tests {
             all_vals.extend(vec);
         }
         all_vals.sort_unstable();
-        let expected: Vec<_> = (0 .. (num_threads * num_vals))
+        let expected: Vec<_> = (0..(num_threads * num_vals))
             .map(|i| format!("sro{:03}orz", i))
             .collect();
         assert_eq!(expected, all_vals);
@@ -685,13 +685,13 @@ mod tests {
         let deque = Arc::new(Deque::<i32>::new());
         let num_threads: usize = 4;
         let num_vals: usize = 2048;
-        let push_handles: Vec<_> = (0 .. num_threads)
+        let push_handles: Vec<_> = (0..num_threads)
             .map(|k| {
                 let dq = Arc::clone(&deque);
                 thread::Builder::new()
                     .name(format!("T{}push", k))
                     .spawn(move || {
-                        for i in 0 .. num_vals {
+                        for i in 0..num_vals {
                             let x = (k * num_vals + i) as i32;
                             // println!("[T{}push] Pushing: {}", k, x);
                             dq.push_front(x);
@@ -701,7 +701,7 @@ mod tests {
                     .unwrap()
             })
             .collect();
-        let pop_handles: Vec<_> = (0 .. num_threads)
+        let pop_handles: Vec<_> = (0..num_threads)
             .map(|k| {
                 let dq = Arc::clone(&deque);
                 thread::Builder::new()
@@ -730,7 +730,7 @@ mod tests {
             all_vals.extend(vals);
         }
         all_vals.sort_unstable();
-        let expected = Vec::from_iter(0 .. ((num_threads * num_vals) as i32));
+        let expected = Vec::from_iter(0..((num_threads * num_vals) as i32));
         assert_eq!(expected, all_vals);
     }
 
@@ -739,13 +739,13 @@ mod tests {
         let deque = Arc::new(Deque::<i32>::new());
         let num_threads: usize = 32;
         let num_vals: usize = 16384;
-        let push_handles: Vec<_> = (0 .. num_threads)
+        let push_handles: Vec<_> = (0..num_threads)
             .map(|k| {
                 let dq = Arc::clone(&deque);
                 thread::Builder::new()
                     .name(format!("T{}push", k))
                     .spawn(move || {
-                        for i in 0 .. num_vals {
+                        for i in 0..num_vals {
                             let x = (k * num_vals + i) as i32;
                             if x % 2 != 0 {
                                 // println!("[T{}push] Front: {}", k, x);
@@ -760,7 +760,7 @@ mod tests {
                     .unwrap()
             })
             .collect();
-        let pop_handles: Vec<_> = (0 .. num_threads)
+        let pop_handles: Vec<_> = (0..num_threads)
             .map(|k| {
                 let dq = Arc::clone(&deque);
                 thread::Builder::new()
@@ -795,7 +795,7 @@ mod tests {
             all_vals.extend(vals);
         }
         all_vals.sort_unstable();
-        let expected = Vec::from_iter(0 .. ((num_threads * num_vals) as i32));
+        let expected = Vec::from_iter(0..((num_threads * num_vals) as i32));
         assert_eq!(expected, all_vals);
     }
 }
